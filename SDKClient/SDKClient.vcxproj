@@ -124,12 +124,16 @@ copy /Y "$(ProjectDir)ManusSDK\ManusSDK.lib" "$(OutDir)ManusSDK.lib"</Command>
     <ClInclude Include="PlatformSpecific\ClientPlatformSpecific.hpp" />
     <ClInclude Include="PlatformSpecific\Windows\ClientPlatformSpecificTypes.hpp" />
     <ClInclude Include="SDKClient.hpp" />
+    <ClInclude Include="UDPReceiver.h" />
+    <ClInclude Include="UDPSender.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\SDKMinimalClient\MQTT_Publisher.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="PlatformSpecific\Windows\ClientPlatformSpecific.cpp" />
     <ClCompile Include="SDKClient.cpp" />
+    <ClCompile Include="UDPReceiver.cpp" />
+    <ClCompile Include="UDPSender.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

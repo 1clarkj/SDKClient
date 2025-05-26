@@ -12,12 +12,15 @@
 #include <memory> // Used for smart pointers.
 #include <sstream>
 #include <functional>
+#include <fstream>
 
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "spdlog/spdlog.h"
 
 #include "ClientPlatformSpecific.hpp"
 #include "ManusSDK.h"
+
+#include "UDPSender.h"
 
 /// @brief Constant expression: number of hands supported by demo.
 constexpr unsigned int NUMBER_OF_HANDS_SUPPORTED = 2;
@@ -106,6 +109,7 @@ public:
 };
 
 /// @brief Used to store the information about the final animated skeletons.
+
 class ClientGestures
 {
 public:
@@ -115,6 +119,12 @@ public:
 
 class SDKClient : public SDKClientPlatformSpecific
 {
+private:
+	std::ofstream csvFile; // File stream for CSV
+	
+	bool m_LastToggleState = false;
+	std::string m_CurrentIP = "127.0.0.1";
+
 public:
 	SDKClient();
 	~SDKClient();
@@ -133,6 +143,10 @@ public:
 	static void OnRawSkeletonStreamCallback(const SkeletonStreamInfo* const p_RawSkeletonStreamInfo);
 	static void OnTrackerStreamCallback(const TrackerStreamInfo* const p_TrackerStreamInfo);
 	static void OnGestureStreamCallback(const GestureStreamInfo* const p_GestureStream);
+	void OpenCSVFile();
+	void WriteToCSV(const ErgonomicsData& handData);
+
+
 
 	float RoundFloatValue(float p_Value, int p_NumDecimalsToKeep);
 	void AdvanceConsolePosition(short int p_Y);

@@ -7,6 +7,8 @@
       <Filter>Platform Specific</Filter>
     </ClCompile>
     <ClCompile Include="..\SDKMinimalClient\MQTT_Publisher.cpp" />
+    <ClCompile Include="UDPSender.cpp" />
+    <ClCompile Include="UDPReceiver.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ManusSDK.h" />
@@ -20,6 +22,8 @@
       <Filter>Platform Specific</Filter>
     </ClInclude>
     <ClInclude Include="..\SDKMinimalClient\MQTT_Publisher.h" />
+    <ClInclude Include="UDPSender.h" />
+    <ClInclude Include="UDPReceiver.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

@@ -3,34 +3,24 @@
 #include <fstream>
 #include <iostream>
 #include <windows.h>
-#include "MQTT_Publisher.h"
+
+#include "UDPSender.h"
+#include "UDPReceiver.h"
 
 #include "ClientPlatformSpecific.hpp"
-
-#include <MQTTAsync.h>
-#include <nlohmann/json.hpp>
 
 
 #define GO_TO_DISPLAY(p_Key,p_Function) if (GetAsyncKeyState(p_Key)) { ClearConsole();\
 		m_CurrentInteraction = std::bind(&SDKClient::p_Function, this); return ClientReturnCode::ClientReturnCode_Success;}
 
-#define GO_TO_MENU_IF_REQUESTED() if (GetKeyDown('Q')) { ClearConsole();\
+#define GO_TO_MENU_IF_REQUESTED() if (GetAsyncKeyState('Q')) { ClearConsole();\
 		m_CurrentInteraction = nullptr; return ClientReturnCode::ClientReturnCode_Success;}
 
 SDKClient* SDKClient::s_Instance = nullptr;
 
+UDPSender sender = UDPSender("127.0.0.1", 5005);
+UDPReceiver receiver = UDPReceiver(6006);
 
-
-std::string createJSONString(float x, float y) 
-{
-	nlohmann::json jsonData;
-	jsonData["indexLeft"] = x; 
-	jsonData["indexRight"] = y;
-
-	// Convert to JSON string
-	std::string jsonString = jsonData.dump();
-	return jsonString;
-}
 
 
 
@@ -156,7 +146,6 @@ ClientReturnCode SDKClient::Run()
 		if (GetAsyncKeyState(VK_ESCAPE))
 		{
 			spdlog::info("Pressed escape, so the client will now close.");
-			disconnectMQTTClient();
 
 			m_RequestedExit = true;
 		}
@@ -662,10 +651,15 @@ ClientReturnCode SDKClient::PickingConnectionType()
 	if (GetAsyncKeyState('L'))
 	{
 		spdlog::info("Picked local.");
-		initializeMQTTClient();
+		//Initiliase UDP sender
+		
+
 		m_ShouldConnectLocally = true;
 		m_ShouldConnectGRPC = false;
 		m_State = ClientState::ClientState_LookingForHosts;
+
+		//Open CSV
+		OpenCSVFile();
 
 	}
 	else if (GetKeyDown('H'))
@@ -1211,10 +1205,13 @@ void SDKClient::PrintHandErgoData(ErgonomicsData& p_ErgoData, bool p_Left)
 		RoundFloatValue(p_ErgoData.data[t_DataOffset + 2], 2),
 		t_JointNames[2],
 		RoundFloatValue(p_ErgoData.data[t_DataOffset + 3], 2));
-		
+
+
+		//reset joint names from thumb to finger after first loop 
 		t_JointNames = t_FingerJointNames;
 		t_DataOffset += 4;
 	}
+	
 }
 
 /// @brief Print the ergonomics data received from Core.
@@ -1222,15 +1219,22 @@ void SDKClient::PrintErgonomicsData()
 {
 	float indexLeft = 0;
 	float indexRight = 0;
+	float sendBuffer[40];
+
 	// for testing purposes we only look at the first 2 gloves available
 	spdlog::info(" -- Ergo Timestamp {:02d}:{:02d}:{:02d}.{:03d} ~ {:02d}/{:02d}/{:d}(D/M/Y)",
 		m_ErgoTimestampInfo.hour, m_ErgoTimestampInfo.minute, m_ErgoTimestampInfo.second, m_ErgoTimestampInfo.fraction,
 		m_ErgoTimestampInfo.day, m_ErgoTimestampInfo.month, m_ErgoTimestampInfo.year);
-	spdlog::info(" -- Left Glove -- 0x{:X} - Angles in degrees", m_FirstLeftGloveID);
+	//spdlog::info(" -- Left Glove -- 0x{:X} - Angles in degrees", m_FirstLeftGloveID);
+	spdlog::info("Toggle received. Reinitializing sender with IP: {}", m_CurrentIP);
+
 	if (m_LeftGloveErgoData.id == m_FirstLeftGloveID)
 	{
-		PrintHandErgoData(m_LeftGloveErgoData, true);
-		indexLeft = m_LeftGloveErgoData.data[5];
+		PrintHandErgoData(m_LeftGloveErgoData, true);	
+		for (int i = 0; i < 20; ++i) {
+			sendBuffer[i] = m_LeftGloveErgoData.data[i];
+
+		}
 	}
 	else
 	{
@@ -1240,15 +1244,21 @@ void SDKClient::PrintErgonomicsData()
 	
 	if (m_RightGloveErgoData.id == m_FirstRightGloveID)
 	{
+
 		PrintHandErgoData(m_RightGloveErgoData, false);
-		indexRight = m_RightGloveErgoData.data[25];
+		/*WriteToCSV(m_RightGloveErgoData);*/
+		for (int i = 0; i < 20; ++i) {
+			sendBuffer[i+20] = m_RightGloveErgoData.data[i+20];
+
+		}
+		
 	}
 	else
 	{
 		spdlog::info(" ...No Data...");
 	}
-	std::string jsonString = createJSONString(indexLeft, indexRight);
-	publishData(jsonString);
+	sender.sendData(sendBuffer);
+	 
 	std::this_thread::sleep_for(std::chrono::milliseconds(30)); // or roughly 30fps, but good enough to show the results.
 	AdvanceConsolePosition(14);
 }
@@ -1739,16 +1749,31 @@ void SDKClient::HandleHapticCommands()
 	const int t_RightHand = 1;
 
 	// The strange key number sequence here results from having gloves lie in front of you, and have the keys and haptics in the same order.
-	t_HapticState[t_LeftHand].shouldHapticFinger[0] = GetKey('5'); // left thumb
-	t_HapticState[t_LeftHand].shouldHapticFinger[1] = GetKey('4'); // left index
-	t_HapticState[t_LeftHand].shouldHapticFinger[2] = GetKey('3'); // left middle
-	t_HapticState[t_LeftHand].shouldHapticFinger[3] = GetKey('2'); // left ring
-	t_HapticState[t_LeftHand].shouldHapticFinger[4] = GetAsyncKeyState('1'); // left pinky
-	t_HapticState[t_RightHand].shouldHapticFinger[0] = GetKey('6'); // right thumb
-	t_HapticState[t_RightHand].shouldHapticFinger[1] = GetKey('7'); // right index
-	t_HapticState[t_RightHand].shouldHapticFinger[2] = GetKey('8'); // right middle
-	t_HapticState[t_RightHand].shouldHapticFinger[3] = GetKey('9'); // right ring
-	t_HapticState[t_RightHand].shouldHapticFinger[4] = GetKey('0'); // right pinky
+	
+	char collisionCode = receiver.getCollisionCode();
+	bool hapticsFromUDPLeft=false;
+	bool hapticsFromUDPRight=false;
+	if (collisionCode == '1') {
+		// Left collision
+		hapticsFromUDPLeft = true;
+	}
+	else if (collisionCode == '2') {
+		// Right collision
+		hapticsFromUDPRight = true;
+		
+	}
+	t_HapticState[t_LeftHand].shouldHapticFinger[0] = hapticsFromUDPLeft || GetAsyncKeyState('5');
+	t_HapticState[t_LeftHand].shouldHapticFinger[1] = hapticsFromUDPLeft || GetAsyncKeyState('4');
+	t_HapticState[t_LeftHand].shouldHapticFinger[2] = hapticsFromUDPLeft || GetAsyncKeyState('3');
+	t_HapticState[t_LeftHand].shouldHapticFinger[3] = hapticsFromUDPLeft || GetAsyncKeyState('2');
+	t_HapticState[t_LeftHand].shouldHapticFinger[4] = hapticsFromUDPLeft || GetAsyncKeyState('1');
+
+		
+	t_HapticState[t_RightHand].shouldHapticFinger[0] = hapticsFromUDPRight || GetAsyncKeyState('6'); // right thumb
+	t_HapticState[t_RightHand].shouldHapticFinger[1] = hapticsFromUDPRight || GetAsyncKeyState('7'); // right index
+	t_HapticState[t_RightHand].shouldHapticFinger[2] = hapticsFromUDPRight || GetAsyncKeyState('8'); // right middle
+	t_HapticState[t_RightHand].shouldHapticFinger[3] = hapticsFromUDPRight || GetAsyncKeyState('9'); // right ring
+	t_HapticState[t_RightHand].shouldHapticFinger[4] = hapticsFromUDPRight || GetAsyncKeyState('0'); // right pinky
 
 	// Note: this timer is apparently not very accurate.
 	// It is good enough for this test client, but should probably be replaced for other uses.
@@ -1820,11 +1845,11 @@ void SDKClient::HandleHapticCommands()
 /// @brief Handles the console commands for the skeletons.
 void SDKClient::HandleSkeletonCommands()
 {
-	if (GetKeyDown('N'))
+	if (GetAsyncKeyState('N'))
 	{
 		LoadTestSkeleton();
 	}
-	if (GetKeyDown('M'))
+	if (GetAsyncKeyState('M'))
 	{
 		UnloadTestSkeleton();
 	}
@@ -1845,16 +1870,16 @@ void SDKClient::HandleSkeletonHapticCommands()
 	const int t_RightHand = 1;
 
 	// The strange key number sequence here results from having gloves lie in front of you, and have the keys and haptics in the same order.
-	t_HapticState[t_LeftHand].shouldHapticFinger[0] = GetKey('5'); // left thumb
-	t_HapticState[t_LeftHand].shouldHapticFinger[1] = GetKey('4'); // left index
-	t_HapticState[t_LeftHand].shouldHapticFinger[2] = GetKey('3'); // left middle
-	t_HapticState[t_LeftHand].shouldHapticFinger[3] = GetKey('2'); // left ring
-	t_HapticState[t_LeftHand].shouldHapticFinger[4] = GetKey('1'); // left pinky
-	t_HapticState[t_RightHand].shouldHapticFinger[0] = GetKey('6'); // right thumb
-	t_HapticState[t_RightHand].shouldHapticFinger[1] = GetKey('7'); // right index
-	t_HapticState[t_RightHand].shouldHapticFinger[2] = GetKey('8'); // right middle
-	t_HapticState[t_RightHand].shouldHapticFinger[3] = GetKey('9'); // right ring
-	t_HapticState[t_RightHand].shouldHapticFinger[4] = GetKey('0'); // right pinky
+	t_HapticState[t_LeftHand].shouldHapticFinger[0] = GetAsyncKeyState('5'); // left thumb
+	t_HapticState[t_LeftHand].shouldHapticFinger[1] = GetAsyncKeyState('4'); // left index
+	t_HapticState[t_LeftHand].shouldHapticFinger[2] = GetAsyncKeyState('3'); // left middle
+	t_HapticState[t_LeftHand].shouldHapticFinger[3] = GetAsyncKeyState('2'); // left ring
+	t_HapticState[t_LeftHand].shouldHapticFinger[4] = GetAsyncKeyState('1'); // left pinky
+	t_HapticState[t_RightHand].shouldHapticFinger[0] = GetAsyncKeyState('6'); // right thumb
+	t_HapticState[t_RightHand].shouldHapticFinger[1] = GetAsyncKeyState('7'); // right index
+	t_HapticState[t_RightHand].shouldHapticFinger[2] = GetAsyncKeyState('8'); // right middle
+	t_HapticState[t_RightHand].shouldHapticFinger[3] = GetAsyncKeyState('9'); // right ring
+	t_HapticState[t_RightHand].shouldHapticFinger[4] = GetAsyncKeyState('0'); // right pinky
 
 	// Note: this timer is apparently not very accurate.
 	// It is good enough for this test client, but should probably be replaced for other uses.
@@ -1895,27 +1920,27 @@ void SDKClient::HandleSkeletonHapticCommands()
 /// @brief Handles the console commands for the temporary skeletons.
 void SDKClient::HandleTemporarySkeletonCommands()
 {
-	if (GetKeyDown('A'))
+	if (GetAsyncKeyState('A'))
 	{
 		AllocateChains();
 	}
-	if (GetKeyDown('B'))
+	if (GetAsyncKeyState('B'))
 	{
 		BuildTemporarySkeleton();
 	}
-	if (GetKeyDown('C'))
+	if (GetAsyncKeyState('C'))
 	{
 		ClearTemporarySkeleton();
 	}
-	if (GetKeyDown('D'))
+	if (GetAsyncKeyState('D'))
 	{
 		ClearAllTemporarySkeletons();
 	}
-	if (GetKeyDown('E'))
+	if (GetAsyncKeyState('E'))
 	{
 		SaveTemporarySkeletonToFile();
 	}
-	if (GetKeyDown('F'))
+	if (GetAsyncKeyState('F'))
 	{
 		GetTemporarySkeletonFromFile();
 	}
@@ -2221,6 +2246,7 @@ void SDKClient::LoadTestSkeleton()
 		return;
 	}
 	RemoveIndexFromTemporarySkeletonList(t_SklIndex);
+	
 
 	if (t_ID == 0)
 	{
@@ -2616,6 +2642,25 @@ void SDKClient::ClearAllTemporarySkeletons()
 	m_TemporarySkeletons.clear();
 }
 
+void SDKClient::OpenCSVFile() {
+	csvFile.open("manus_hand_data.csv", std::ios::out | std::ios::app);
+
+	if (!csvFile) {
+		std::cerr << "Error opening file!" << std::endl;
+	}
+	else {
+		// Write the header only if the file is empty
+		csvFile.seekp(0, std::ios::end);
+		if (csvFile.tellp() == 0) {
+			csvFile << "thumb_cmc_spread,thumb_cmc_stretch,thumb_mcp_stretch,thumb_ip_stretch,"
+				"index_mcp_spread,index_mcp_stretch,index_pip_stretch,index_dip_stretch,"
+				"middle_mcp_spread,middle_mcp_stretch,middle_pip_stretch,middle_dip_stretch,"
+				"ring_mcp_spread,ring_mcp_stretch,ring_pip_stretch,ring_dip_stretch,"
+				"pinky_mcp_spread,pinky_mcp_stretch,pinky_pip_stretch,pinky_dip_stretch\n";
+		}
+	}
+}
+
 void SDKClient::SaveTemporarySkeletonToFile()
 {
 	// this example shows how to save a temporary skeleton to a file
@@ -2824,4 +2869,15 @@ void SDKClient::RemoveIndexFromTemporarySkeletonList(uint32_t p_Idx)
 			m_TemporarySkeletons.erase(m_TemporarySkeletons.begin() + i);
 		}
 	}
+}
+void SDKClient::WriteToCSV(const ErgonomicsData& handData) {
+	if (!csvFile.is_open()) return;
+
+	int t_DataOffset = 20; // Offset for left or right hand data
+
+	for (int i = 0; i < 20; ++i) {
+		csvFile << RoundFloatValue(handData.data[t_DataOffset + i], 2);
+		if (i != 19) csvFile << ","; // Avoid trailing comma
+	}
+	csvFile << "\n"; // New line after writing a full row
 }
