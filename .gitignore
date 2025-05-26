@@ -361,3 +361,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Keep local build artifacts and test results
+!Debug/**/*.exe
+!Release/**/*.exe
+!Debug/**/*.log
+!Release/**/*.log
